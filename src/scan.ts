@@ -4,7 +4,7 @@ import { errorCode, errorDetails } from "./errors"
 import { isGameRecord } from "./game"
 import { createLaunchers } from "./launchers"
 import { compareName } from "./match"
-import { dedupePaths } from "./paths"
+import { dedupePaths, pathContains } from "./paths"
 import { parseRegTree } from "./registry"
 import { GameLauncher, InstalledGame, LogLevel, ScanAllResult, ScanDeps, ScanReport, WindowsInventory } from "./types"
 
@@ -167,7 +167,45 @@ export async function scanAll(deps: ScanDeps, launchers: readonly GameLauncher[]
     }
     await Promise.all(pendingLogs)
   }
-  games.sort((a, b) => compareName(a.name, b.name))
-  await log("Info", "scan_done", { games: games.length, durationMs: Date.now() - started })
-  return { games, watchDirs: dedupePaths(watchDirs, deps.platform), scanId }
+  const kept = await dropCoveredFallbacks(games, launchers, deps, log)
+  kept.sort((a, b) => compareName(a.name, b.name))
+  await log("Info", "scan_done", { games: kept.length, durationMs: Date.now() - started })
+  return { games: kept, watchDirs: dedupePaths(watchDirs, deps.platform), scanId }
+}
+
+/** True when two installs describe the same folder, or one of them nests the other. */
+export function installDirsOverlap(left: InstalledGame, right: InstalledGame, platform: NodeJS.Platform): boolean {
+  const leftDirs = [left.installDir, left.libraryPath].filter(Boolean)
+  const rightDirs = [right.installDir, right.libraryPath].filter(Boolean)
+  return leftDirs.some(owner => rightDirs.some(other => pathContains(owner, other, platform) || pathContains(other, owner, platform)))
+}
+
+/**
+ * A fallback source such as the local games folder walks directories that a platform launcher may
+ * already own. Its rows are dropped when a primary source indexed the same install, so a game is
+ * never listed twice.
+ */
+async function dropCoveredFallbacks(
+  games: InstalledGame[],
+  launchers: readonly GameLauncher[],
+  deps: ScanDeps,
+  log: (level: LogLevel, event: string, fields?: Record<string, unknown>) => Promise<void>
+): Promise<InstalledGame[]> {
+  const fallback = new Set(launchers.filter(launcher => launcher.fallback === true).map(launcher => launcher.id))
+  if (!fallback.size) return games
+  const primary = games.filter(game => !fallback.has(game.source))
+  const kept: InstalledGame[] = []
+  for (const game of games) {
+    if (!fallback.has(game.source)) {
+      kept.push(game)
+      continue
+    }
+    const owner = primary.find(other => installDirsOverlap(other, game, deps.platform))
+    if (!owner) {
+      kept.push(game)
+      continue
+    }
+    await log("Info", "fallback_game_skipped", { source: game.source, id: game.id, installDir: game.installDir, coveredBy: owner.id, coveredByDir: owner.installDir || owner.libraryPath })
+  }
+  return kept
 }

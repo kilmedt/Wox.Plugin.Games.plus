@@ -78,7 +78,8 @@ export async function applyGameIcon(deps: ScanDeps, game: InstalledGame, sourceP
 
 /** Installers, crash handlers, and anti-cheat bootstrappers. Their icons are not the game's icon. */
 export function isHelperExecutable(file: string): boolean {
-  return /unins|crash|redist|setup|anticheat|touchup|cleanup/i.test(path.win32.basename(String(file || "")))
+  // `handler` and `uploader` cover crashpad and the crs-* reporters some games ship.
+  return /unins|卸载|uninstall|crash|redist|setup|anticheat|touchup|cleanup|bugreport|handler|uploader/i.test(path.win32.basename(String(file || "")))
 }
 
 export async function primaryExe(deps: ScanDeps, dir: string): Promise<string> {

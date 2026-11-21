@@ -85,6 +85,8 @@ export interface LauncherScan {
 export interface GameLauncher {
   readonly id: string
   readonly label: string
+  /** A fallback source indexes folders that other launchers already own, so overlapping games are dropped. */
+  readonly fallback?: boolean
   scan(deps: ScanDeps): Promise<LauncherScan>
 }
 
